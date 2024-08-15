@@ -1708,61 +1708,18 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
     }
     
     public function getCartItemsOrderData($order_id){
-        $payload = [];
-      /*  if($this->includeCartData !== true){
-            return $payload;
-        }*/
+	// Transaction Description
+        $payload = [];	    
         $cartname = "";
         $order_id = (int)$order_id;
         $oObj = wc_get_order($order_id);
-        foreach($oObj->get_items(['line_item']) as $oItemId => $oItem){
-           /* $oProd = $oItem->get_product();
-            $cartItem = [
-                'name' => substr($oItem->get_name(),0,255),
-                'merchantItemId' => $oItem->get_product_id(),
-                'quantity' => (int)$oItem->get_quantity(),
-                'type' => ($oProd->is_virtual() === true ? 'DIGITAL' : 'PHYSICAL'),
-                'sku' => ($oProd->get_sku() === '' ? $oItem->get_product_id() : $oProd->get_sku()),
-                'currency' => $oObj->get_currency(),
-                'description' => substr(wp_strip_all_tags($oProd->get_description()),0,255),
-                'price' => number_format((float)$oObj->get_item_subtotal($oItem), 2, '.', ''),
-                'totalAmount' => number_format(((float)$oItem->get_total() + (float)$oObj->get_line_tax($oItem)), 2, '.', ''),
-                'taxAmount' => number_format( (float)$oObj->get_item_tax($oItem), 2, '.', '' ),
-                'totalTaxAmount' => number_format( (float)$oObj->get_line_tax($oItem), 2, '.', '' )
-            ];
-            $cartItems[] = $cartItem;*/
-			
-			$cartname .= $oItem->get_name() . " - ". $oItem->get_quantity() . " x ". $oItem->get_total();
+	    
+        foreach($oObj->get_items(['line_item']) as $oItemId => $oItem){			
+		$cartname .= $oItem->get_name() . " - ". $oItem->get_quantity() . " x ". $oItem->get_total();
         }
-        /*foreach( $oObj->get_items('shipping') as $oItemId => $shipping_item_obj ){
-            $cartItem = [
-                'name' => 'Shipping',
-                'merchantItemId' => $shipping_item_obj->get_method_id() .':'. $shipping_item_obj->get_instance_id(),
-                'quantity' => 1,
-                'type' => 'MIXED',
-                'currency' => $oObj->get_currency(),
-                'description' => substr($shipping_item_obj->get_method_title(),0,255),
-                'price' => number_format( (float)$shipping_item_obj->get_total(), 2, '.', '' ),
-                'shipping' => number_format( (float)$shipping_item_obj->get_total(), 2, '.', '' ),
-                'shippingMethod' => substr($shipping_item_obj->get_name(),0,255),
-                'totalAmount' => number_format( (float)$shipping_item_obj->get_total() + (float)$shipping_item_obj->get_total_tax(), 2, '.', '' ),
-                'taxAmount' => number_format( (float)$shipping_item_obj->get_total_tax(), 2, '.', '' ),
-                'totalTaxAmount' => number_format( (float)$shipping_item_obj->get_total_tax(), 2, '.', '' )
-            ];
-            $cartItems[] = $cartItem;
-        }*/
-        /*$n = 0;
-        foreach($cartItems as $lineItemArray){
-            foreach($lineItemArray as $k => $v){
-                if(!empty($v) || $v !== ''){
-                    if(in_array($k,$this->arrStaticData('forcePrecision2Dp'))){
-                        $v = number_format($v, 2, '.', '');
-                    }
-                    $payload['cart.items['.$n.'].'.$k] = $v;
-                }
-            }
-            $n++;
-        }*/
+	    
+	$cartname = substr($cartname,0,255);
+	    
         return $cartname;
     }
     
