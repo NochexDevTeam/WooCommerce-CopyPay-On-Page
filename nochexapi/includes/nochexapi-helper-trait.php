@@ -341,10 +341,6 @@ trait NochexapiHelperTrait{
             return;
         }
 
-       /* if( !isset( $this->logLevels ) || !in_array( $level, $this->logLevels )){
-            return;
-        }*/
-        
         $logger     = wc_get_logger();
         
         $context    = array( 'source' => Nochexapi_CONSTANTS::GATEWAY_ID );

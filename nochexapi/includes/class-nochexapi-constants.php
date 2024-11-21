@@ -11,8 +11,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 class WC_Nochexapi_Constants {
     const VERSION                          = "4.8.3";
     const DEBUG                            = false;
-    /*const GLOBAL_PREFIX                    = "tpcpv3_";
-    const GATEWAY_ID                       = "wc_tp_cardsv3";*/
 	
     const GLOBAL_PREFIX                    = "nochexapi_";
     const GATEWAY_ID                       = "nochexapi";

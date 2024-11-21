@@ -31,8 +31,8 @@ class Nochexapi_Deactivator {
 	 * @since    5.2.0
 	 */
 	public static function deactivate() {
-        self::tpcp_gateway_cardsv2_deactivation();
-        self::cronstarter_deactivate();
+        /*self::tpcp_gateway_cardsv2_deactivation();
+        self::cronstarter_deactivate();*/
 	}
 
     public function tpcp_gateway_cardsv2_deactivation() {

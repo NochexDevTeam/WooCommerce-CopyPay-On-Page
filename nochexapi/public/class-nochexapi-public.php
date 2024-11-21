@@ -37,6 +37,17 @@ class Nochexapi_Public {
 
 	}
 
+	public function apc() {
+		global $woocommerce;
+		
+		echo "TEST THIS";
+		
+		mail("james.lugton@nochex.com","Test Callback function can get to it","Test copyPay","james.lugton@nochex.com");
+		/*$this->debug_log("APC - APC / Callback script to update orders - Begin");	
+		if($_POST) {
+			$this->apc = include 'includes/class-wc-nochex-apccallback.php';
+		}	*/
+	}
 	/**
 	 * Register the stylesheets for the public-facing side of the site.
 	 *

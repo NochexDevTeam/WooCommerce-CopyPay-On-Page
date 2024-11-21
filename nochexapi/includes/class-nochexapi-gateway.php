@@ -28,34 +28,32 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
         $this->serversidedebug                   = ($this->get_option( 'serversidedebug' ) === 'yes' ? true : false);
         $this->logLevels                         = $this->get_option( 'logLevels' );
         $this->platformBase                      = $this->get_option( 'platformBase' );
-        $this->entityId_test                     = "8ac7a4ca7843f17d017844faa85f0829"; //$this->get_option( 'entityId_test' );
-        $this->accessToken_test                  = "OGFjN2E0Y2E3ODQzZjE3ZDAxNzg0NGY4MTFjNjA4MjR8V2hFMlB4WHdFcA"; //$this->get_option( 'accessToken_test' );
+        $this->entityId_test                     = "8ac7a4ca7843f17d017844faa85f0829"; 
+        $this->accessToken_test                  = "OGFjN2E0Y2E3ODQzZjE3ZDAxNzg0NGY4MTFjNjA4MjR8V2hFMlB4WHdFcA";
         $this->entityId                          = $this->get_option( 'entityId' );
         $this->accessToken                       = $this->get_option( 'accessToken' );
-        $this->paymentType                       = "DB"; //$this->get_option( 'paymentType' );
-        $this->createRegistration                = true; //($this->get_option( 'createRegistration' ) === 'yes' ? true : false);
-        //$this->slickOneClick                     = ($this->get_option( 'slickOneClick' ) === 'yes' ? true : false);
+        $this->paymentType                       = "DB";
+        $this->createRegistration                = true;
         $this->slickOneClick                     = false;
-        $this->includeCartData                   = true; //($this->get_option( 'includeCartData' ) === 'yes' ? true : false);
+        $this->includeCartData                   = true;
         $this->dupePaymentCheck                  = ($this->get_option( 'dupePaymentCheck' ) === 'yes' ? true : false);
         $this->end2end                           = get_option( Nochexapi_CONSTANTS::GLOBAL_PREFIX . 'gateway_cardsv2_e2e' );
         $this->iframePostId                      = (int)get_option( Nochexapi_CONSTANTS::GLOBAL_PREFIX . 'gateway_cardsv2_iframe' );
         $this->iframeForceSsl                    = false;
         $this->iframeJsRenderer                  = true;
         $this->secureCodeLogos                   = true;
-        //$this->labelHex                          = $this->get_option( 'labelHex' );
+	
         $this->externalWpFrame                   = false;
-        $this->threeDv2                          = true; //($this->get_option( 'threeDv2' ) === 'yes' ? true : false);
-        $this->threeDv2Params                    = ["ReqAuthMethod"]; //$this->get_option( 'threeDv2Params' );
-        $this->transactionType3d                 = '01'; //$this->get_option( 'transactionType3d' );
+        $this->threeDv2                          = true; 
+        $this->threeDv2Params                    = ["ReqAuthMethod"];
+        $this->transactionType3d                 = '01';
         $this->useModalPayFrames                 = ($this->get_option( 'useModalPayFrames' ) === 'yes' ? true : false);
         $this->externalFrameUrl                  = Nochexapi_CONSTANTS::getExternalFrameURL();
         $this->legacyEndpoints                   = ($this->get_option( 'legacyEndpoints' ) === 'yes' ? true : false);
         $this->checkoutOrderCleanup              = true;
         //custom css
-        $this->paymentBrands                     = ['VISA','MASTER']; //$this->get_option( 'paymentBrands' );
-        //$this->paymentLogoCss                    = $this->get_option( 'paymentLogoCss' );
-        //$this->customCss                         = $this->get_option( 'customCss' );
+        $this->paymentBrands                     = ['VISA','MASTER'];
+		
         $this->autoFocusFrameCcNo                = ($this->get_option( 'autoFocusFrameCcNo' ) === 'yes' ? true : false);
         $this->framePrimaryColor                 = $this->get_option( 'framePrimaryColor' );
         $this->frameAccentColor                  = $this->get_option( 'frameAccentColor' );
@@ -64,15 +62,110 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
         $this->framewpwlControlBorderRadius      = $this->get_option( 'framewpwlControlBorderRadius' );
         $this->framewpwlControlBorderColor       = $this->get_option( 'framewpwlControlBorderColor' );
         $this->framewpwlControlBorderWidth       = $this->get_option( 'framewpwlControlBorderWidth' );
-        $this->framewpwlControlMarginRight       = $this->get_option( 'framewpwlControlMarginRight' );
-        //logFile location
-        $this->logPath                           = Nochexapi_CONSTANTS::getFilePaths( 'logs', 3, true );
+        $this->framewpwlControlMarginRight       = $this->get_option( 'framewpwlControlMarginRight' ); 
         // Initialise settings
         //Load funcs
         add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
         add_action( 'woocommerce_api_' . Nochexapi_CONSTANTS::GLOBAL_PREFIX . 'gateway_cardsv2_e2e', array( $this, 'tpcp_gateway_cardsv2_e2e' ) );
         add_action( 'woocommerce_api_' . Nochexapi_CONSTANTS::GLOBAL_PREFIX . 'gateway_cardsv2_cbk', array( $this, 'tpcp_gateway_cardsv2_cbk' ) );
+			
+		add_action( 'woocommerce_api_'. $this->id, array( $this, 'apc' ) );
+		
     }
+		function debug_log( $debugMsg ) {
+		$log = new WC_Logger();
+		$log->add( 'Nochex', $debugMsg );
+		}
+
+	function apc() {
+		global $woocommerce;
+			
+		if ($_POST['order_id']) {
+			
+		$order_id = sanitize_text_field($_POST['order_id']);
+		$order_id = esc_html($order_id);
+		$transaction_id = sanitize_text_field($_POST['transaction_id']);
+		$transaction_id = esc_html($transaction_id);
+		$transaction_date = sanitize_text_field($_POST['transaction_date']);
+		$transaction_date = esc_html($transaction_date);
+	
+		$this->debug_log("Callback process executing ----------"); 
+	
+		$transaction_amount = sanitize_text_field($_POST['amount']);
+		$transaction_amount = esc_html($transaction_amount);
+		$callback_transaction_status = sanitize_text_field($_POST['transaction_status']);
+		$callback_transaction_status = esc_html($callback_transaction_status);
+		$callback_transaction_to = sanitize_text_field($_POST['merchant_id']);
+		$callback_transaction_to = esc_html($callback_transaction_to);
+		$callback_transaction_from = sanitize_text_field($_POST['email_address']);
+		$callback_transaction_from = esc_html($callback_transaction_from);
+		$order = new WC_Order($order_id);
+		
+		//if ($order->get_status() != $this->order_complete_status) {
+		
+			// if ( $order->get_total() != $transaction_amount ) {
+			// 	// Put this order on-hold for manual checking
+			// 	$order->update_status( $this->settings['order_onhold_status'], sprintf( __( 'Validation error: Nochex amounts do not match (total %s).', 'woocommerce' ), $transaction_amount ) );
+			// 	return;
+			// }
+			$postvars = http_build_query($_POST);
+			$nochex_apc_url = "https://secure.nochex.com/callback/callback.aspx";
+			$params = array(
+				'body' => $postvars,
+				'sslverify' => true,
+				'Content-Type'=> 'application/x-www-form-urlencoded',
+				'Content-Length'=> strlen($postvars),
+				'Host'=> 'www.nochex.com',
+				'user-agent'=> 'WooCommerce/' . $woocommerce->version
+			);
+			// Post back to get a response
+			$output = wp_remote_retrieve_body(wp_remote_post($nochex_apc_url, $params));
+			// Debug - Features
+			$FormFields = 'Order Details: - Callback Output: ' . $output;
+			$this->debug_log($FormFields);
+			$apcFieldsReturn = 'APC Fields: to_email: ' . $callback_transaction_to . ', from_email: ' .$callback_transaction_from.', transaction_id: ' . $transaction_id .', transaction_date: '.$transaction_date . ', order_id: ' .$order_id . ', amount: ' .$transaction_amount . ', status: ' . $callback_transaction_status;
+			
+			//Output Actions
+
+			if ($callback_transaction_status == "100") {
+				$status = " TEST";
+			} else {
+				$status = " LIVE";
+			}
+
+			if( $output == 'AUTHORISED' ) {
+				// Notes for an Order - Output status (AUTHORISED / DECLINED), and Transaction Status (Test / Live)
+				$callbackNotes = "<ul style=\"list-style:none;\">";
+				$callbackNotes .= "<li>Transaction Status: " . $status . "</li>";
+				$callbackNotes .= "<li>Transaction ID: ".$transaction_id . "</li>";
+				$order->add_order_note( $callbackNotes);
+				// APC Debug, Output and fields
+				$apcRequestPass =  'Callback Passed, Response: ' . $output . ', ' . $apcFieldsReturn;
+				$FormFields = 'Order Details: - CALLBACK AUTHORISED: ' . $apcRequestPass . ", Order Note 1: Nochex CALLBACK Passed, Response: " . $output . ", Order Note 2: Nochex Payment Status:" . $status;
+				$this->debug_log($FormFields);
+				$order->payment_complete();
+				$woocommerce->cart->empty_cart();
+			} else {
+				//Output Action - Declined
+				$apcRequestFail =  'Callback Failed, Response: ' . $output . ', ' . $apcFieldsReturn;
+				// Notes for an Order - Output status (AUTHORISED / DECLINED), and Transaction Status (Test / Live)
+				$callbackNotes = "<ul style=\"list-style:none;\">";
+				$callbackNotes .= "<li>Transaction Status: " . $status . "</li>";
+				$callbackNotes .= "<li>Transaction ID: ". $transaction_id . "</li>";
+				$order->add_order_note( $callbackNotes);
+				// APC Debug, Output and fields
+				$FormFields = 'Order Details: - CALLBACK AUTHORISED: ' . $apcRequestFail . ", Order Note 1: Nochex CALLBACK Passed, Response: " . $output . ", Order Note 2: Nochex Payment Status:" . $status;
+				$this->debug_log($FormFields);
+			}
+			
+			exit;
+		//}	
+
+		} else {
+			wp_die( "Nochex APC Page - Request Failed" );
+		} 
+
+	}
     
     /*
      * Function to preparing of setting fields for different tabs
@@ -117,16 +210,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
         $icons_str = '';
 		
         $icons_str .= '<img src="' . plugin_dir_url( __DIR__ ).'assets/img/nochexapilogo.png" class="nochexapi-payment-gateways-icon-img" alt="Nochexapi" style="width: 270px;max-width:inherit;max-height:inherit;height: auto;float:unset!important;padding-top: 0px;">'."\n";
-		
-        /*foreach($this->paymentBrands as $brand){
-            if($this->secureCodeLogos === true){
-                $icons_str .= '<img src="' . plugin_dir_url( __DIR__ ).'assets/img/'. $brand. '-3d.svg' . '" class="tp-payment-gateways-icon-img" alt="'.$brand.'">'."\n";
-            } else {
-                $icons_str .= '<img src="' . plugin_dir_url( __DIR__ ).'assets/img/'. $brand. '.svg' . '" class="tp-payment-gateways-icon-img" alt="'.$brand.'">'."\n";
-            }
-        }*/
-		
-				
+						
         return apply_filters( 'woocommerce_gateway_icon', $icons_str, $this->id );
     }
     /*
@@ -207,21 +291,10 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
                     $params["AccountDate"] = $date1->format("Ymd");
                 }
                 if(in_array('AccountPurchaseCount', $this->threeDv2Params)){
-                    /*$dtFrom = '>' . date('Y-m-d', strtotime('-6 month'));
-                    $paidOrdersArgs = array(
-                        'type' => 'shop_order',
-                        'status' => array('wc-processing', 'wc-completed'),
-                        'limit' => 5,
-                        'customer_id' => $userId,
-                        'date_paid' => $dtFrom,
-                        'return' => 'ids',
-                    );*/
+                  
                     $orderCount = $this->getClientOrdersCountForLast6Months( $userId );// this is needed to lower risk while payment
                     $params["AccountPurchaseCount"] = intval($orderCount);
-                    /*if(is_array($orderArray)){
-                        $params["AccountPurchaseCount"] = count($orderArray);
-                    }*/
-                }
+                              }
             }
         }
         
@@ -292,11 +365,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
         add_action( 'wp', array( $this, '_init' ) );
         //filter hooks
         add_filter( 'plugin_action_links_' . $plugin_basename, array( $this, 'plugin_action_links' ) );
-        /*if(is_user_logged_in()){
-            if(current_user_can('administrator')){
-                add_action( 'admin_menu', array( $this, 'tp_cards_cbk_menu' ) );
-            }
-        }*/
+        		
         add_action( 'woocommerce_payment_token_deleted', array( $this, 'tp_card_deregistration' ) , 10, 2 );
         add_filter( 'woocommerce_account_payment_methods_columns', array( $this, 'tpcards_account_payment_methods_columns' ) , 10, 1 );
         add_filter( 'woocommerce_payment_methods_list_item', array( $this, 'tpcards_payment_methods_list_item' ) , 10, 2 );
@@ -304,19 +373,10 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
         add_action( 'woocommerce_account_payment_methods_column_field2', array( $this, 'tpcards_payment_methods_column_field2' ) );
         add_action( 'woocommerce_after_checkout_form', array( $this, 'tpcards_formhtml' ), 10 );
     }
-    
-    /*public function tp_cards_cbk_menu(){
-        add_menu_page( 'Test CBK Page', 'Test CBK', 'manage_options', 'wc_cardsv2_cbks', array( $this, 'tp_cards_cbk_page' ) );
-    }
-    
-    public function tp_cards_cbk_page(){
-        echo "<h1>CBK Report</h1>";
-    }*/
-    
+        
     public function _init(){
         $this->generatePciFramePageOnMissing();
         $this->updateRequiredOldSettingsData();
-        //$this->sync_saved_cards_tokens();
     }
 
     public function tpcards_formhtml(){
@@ -523,7 +583,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
 
     public function payment_scripts_cards() {
         if($this->checkPageShouldRun() === true){
-            
+		
             $tp_pluginVer = Nochexapi_CONSTANTS::VERSION;
             $prefix       = Nochexapi_CONSTANTS::GLOBAL_PREFIX;
             if($this->useModalPayFrames === true){
@@ -597,6 +657,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
                 wp_enqueue_script($prefix . 'tp_swal_poly1');
                 wp_enqueue_script($prefix . 'tp_swal');
             }
+			
         }
     }
     
@@ -655,12 +716,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
             'headers' => ['Content-Type' => 'application/x-www-form-urlencoded; charset=UTF-8','Authorization' => 'Bearer '.($this->platformBase === 'oppwa.com' ? $this->accessToken : $this->accessToken_test)],
             'body' => $payload
         ];
-        
-        /*if($this->proxyRequests === true){
-            $array['headers']['Fwdurl'] = $remoteUrl;
-            $remoteUrl = $this->proxyUrl;
-        }*/
-        
+         
         $response = wp_remote_request( $remoteUrl , $array);
         
         $this->shouldLogResponseHandler($response, [$array, $payload]);
@@ -681,7 +737,6 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
                         "platformBase"=>$this->derivePlatformBase(),
                         "paymentBrands"=>implode(' ',$this->paymentBrands),
                         "autoFocusFrameCcNo"=>$this->autoFocusFrameCcNo,
-                        //"labelHex"=>$this->labelHex,
                         "enforceJsLoader"=>$this->iframeJsRenderer,
                         "expiry"=>date("Y-m-d H:i:s", strtotime("+30 minutes"))
                     ];
@@ -830,7 +885,6 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
         if($validate['result'] === true && isset($validate['order_id']) === true){
             //load order
             $order = wc_get_order( $validate['order_id'] );
-            //$order->get_checkout_payment_url( $on_checkout = false );
             //get order_data
             $order_data = $order->get_data();
             //generate checkoutId
@@ -1103,10 +1157,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
         if($payload !== false){
             $array['body']=$payload;
         }
-        /*if($this->proxyRequests === true){
-            $array['headers']['Fwdurl'] = $url;
-            $url = $this->proxyUrl;
-        }*/
+		
         $this->writeLog('------------prepareRemoteRequest -----------','debug');
         $this->writeLog($url,'debug');
         
@@ -1176,7 +1227,8 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
     }
     
     public function parseResponseData($responseData){
-        
+        /****** return function from CP / axs  */
+		
         global $woocommerce;
         $debugTimeArray[0] = time();
         $array = ['notices'=>[]];
@@ -1198,8 +1250,14 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
 				} else {
 					$description = str_replace("'", "" , $responseData->result->description);
 				}
-                //$description = str_replace("'", "" , $responseData->result->description);
             }
+				if(isset($responseData->result->code)){
+					$code = (string)$responseData->result->code;
+					if($code === '100.550.312') {
+						$description = "<div class='alert alert-danger'><p class='lead'>Transaction amount is less than the permitted minimum!</p></div>";
+					} 
+				}
+				
             if(isset($responseData->merchantTransactionId)){
                 $checks = true;
                 $order_id = (int)$responseData->merchantTransactionId;
@@ -1214,10 +1272,10 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
                     $checks = false;
                     $array['notices'][] = 'payment_method not tpcards';
                 }
-                if($order_data['status'] !== 'pending'){
+               /* if($order_data['status'] !== 'pending'){
                     $checks = false;
                     $array['notices'][] = 'status!pending';
-                }
+                }*/
                 if($amount !== number_format($responseData->customParameters->SHOPPER_amount,2,'.','')){
                     $checks = false;
                     $array['notices'][] = 'amount mismatch';
@@ -1238,7 +1296,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
                     if($paymentSuccess === true){
                         $this->writeLog('------parseResponseData payment is successful---------','debug');
                         //good to go..
-                        $order->payment_complete( $transaction_id );
+                        //$order->payment_complete( $transaction_id );
                         $this->writeLog('------parseResponseData set order with payment complete---------','debug');
                         $debugTimeArray[2] = time();
                         //if PA// capture
@@ -1246,7 +1304,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
                         $debugTimeArray[3] = time();
                         $order->add_order_note( 'Your order is paid! Thank you!', true );
                         $order->add_order_note( $code, false );
-                        $order->add_order_note( "Payment reference: " . $responseData->id, false );
+                        //$order->add_order_note( "Payment reference: " . $responseData->id, false );
                         $order->add_order_note( $description, false );
                         $order->add_meta_data('platformBase', $this->derivePlatformBase());
                         $order->add_meta_data('paymentType', (string)$responseData->paymentType);
@@ -1258,7 +1316,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
                             }
                             $debugTimeArray[5] = time();
                         }
-                        $order->save();
+                        //$order->save();
                         $this->writeLog('------parseResponseData order updated after all set of data---------','debug');
                         $debugTimeArray[6] = time();
                         $array['result'] = 'success';
@@ -1273,7 +1331,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
                         $this->writeLog(['code' => $code, 'description' => $description],'debug');
                         $order->add_order_note( $code, false );
                         $order->add_order_note( $description, false );
-                        $order->save();
+                        //$order->save();
                         //decline reason..
                         $array['notices'][] = 'Payment not completed: '.$description;
                         $array['error'] = $description;
@@ -1347,7 +1405,17 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
     }
     
     public function payment_fields(){
-        if( $this->useModalPayFrames === false ):
+	
+	$less = "";
+	if (WC()->cart->get_total(null) < 0.5){
+		$less = "less";
+	?>	
+			<style>#place_order{display:none}</style>
+            <div><h1 style="text-align:center;font-size:24px;">Amount less than 50p is not permitted!</h1></div>
+        <?php
+		return;
+	}
+        if( $this->useModalPayFrames === false and $less == ""):
         ?>
         <style type="text/css">li.payment_method_<?php echo Nochexapi_CONSTANTS::GATEWAY_ID;?> div.payment_box {padding: 0!important;}</style>
         <?php do_action( 'woocommerce_credit_card_form_start', Nochexapi_CONSTANTS::GATEWAY_ID );?>
@@ -1370,22 +1438,7 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
             </script>
             <?php endif; ?>
         <?php
-        endif;
-        /*$showTestCards = true;
-        
-        if($showTestCards === true){
-            if($this->platformBase === 'test.oppwa.com'){
-                if(in_array('VISA',$this->paymentBrands)){
-                    echo '<p><small><strong>v1,v2 Visa:</strong> <em>4711100000000000</em>, <em>4200000000000042</em></small></p>'."\n";
-                }
-                if(in_array('MASTER',$this->paymentBrands)){
-                    echo '<p><small><strong>v1,v2 Master:</strong> <em>5285601704480326</em>, <em>5200000000000015</em></small></p>'."\n";
-                }
-                if(in_array('AMEX',$this->paymentBrands)){
-                    echo '<p><small><strong>v1,v2 Amex:</strong> <em>341111597242513</em>, <em>343434343434343</em></small></p>'."\n";
-                }
-            }
-        }*/
+        endif; 
         
     }
     
@@ -1624,6 +1677,9 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
     }
     
     public function prepareOrderDataForPayload($order_data,$additionalParams = []){
+	
+	/** send payload to CP / AX **/
+	
         global $wp_version;
         $payload = [
             "paymentType" => $this->paymentType,
@@ -1702,9 +1758,14 @@ class WC_Payment_Gateway_Nochexapi extends WC_Payment_Gateway {
         }
 		$payload["cart.items[0].name"] = $this->getCartItemsOrderData($order_data['id']);
 		
+		$callback_url = add_query_arg( 'wc-api', 'Nochexapi', home_url( '/' ) );
+
+		$payload["cart.items[0].productUrl"] = $callback_url;
+		
+		
+		
         
-        return array_merge($payload, $additionalParams);
-        //return $payload;
+        return array_merge($payload, $additionalParams); 
     }
     
     public function getCartItemsOrderData($order_id){
