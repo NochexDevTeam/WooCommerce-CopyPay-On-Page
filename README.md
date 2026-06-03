@@ -35,7 +35,9 @@ To help improve the security and visibility of your WordPRess site, we recommend
 This lightweight tool keeps an eye on your site's scripts - whether inline, external, or dynamically generated and alerts you to any changes. It's a simple way to stay informed about what is running behind the scenes, and helping you to spot any potential issues early without needing too deep technical knowledge but advise to consult with your developer for assistance.
 
 == Changelog ==
-
+= 4 =
+* Updated Plugin
+  
 = 3 =
 * First Release.
 
