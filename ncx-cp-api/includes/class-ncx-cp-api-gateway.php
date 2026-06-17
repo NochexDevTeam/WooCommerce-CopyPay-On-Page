@@ -93,6 +93,7 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
         $this->allow_card_saving = true;
 
         add_action('woocommerce_update_options_payment_gateways_' . $this->id, [$this, 'process_admin_options']);
+        add_action('admin_enqueue_scripts', [$this, 'maybe_enqueue_admin_assets']);
         add_action('woocommerce_receipt_' . $this->id, [$this, 'render_receipt'], 10, 1);
         add_action('woocommerce_api_' . self::CALLBACK_ACTION, [$this, 'handle_result']);
         add_action('woocommerce_api_' . self::NOTIFICATION_ACTION, [$this, 'handle_notification']);
@@ -252,6 +253,18 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
                     'info'      => __('Information', 'ncx-cp-api'),
                     'warning'   => __('Warning', 'ncx-cp-api'),
                 ],
+            ],
+            'opp_entity_in_query' => [
+                'title'       => __('Entity ID in URL (Phase 1 test)', 'ncx-cp-api'),
+                'type'        => 'checkbox',
+                'label'       => __('Send entityId as a query parameter on POST /v1/checkouts (in addition to removing it from the body).', 'ncx-cp-api'),
+                'default'     => 'no',
+                'description' => __('Diagnostic only. Try this if checkout session creation fails with HTML Access Denied responses.', 'ncx-cp-api'),
+            ],
+            'opp_connectivity_test' => [
+                'title'       => __('OPP connectivity test', 'ncx-cp-api'),
+                'type'        => 'opp_connectivity_test',
+                'description' => __('Compare direct cURL vs WordPress HTTP API against POST /v1/checkouts. Live traffic uses cURL by default (WordPress is fallback only when cURL is unavailable). Enable Server logging to retain results under WooCommerce → Status → Logs.', 'ncx-cp-api'),
             ],
         ];
     }
@@ -654,17 +667,20 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
         }
 
         // Post back to Nochex to verify the callback is genuine.
-        $verify_response = wp_remote_post(self::APC_URL, [
-            'timeout'    => 30,
-            'sslverify'  => true,
-            'body'       => wp_unslash($_POST), // phpcs:ignore WordPress.Security.NonceVerification.Missing
-            'headers'    => [
-                'Content-Type' => 'application/x-www-form-urlencoded',
-            ],
-            'user-agent' => 'WooCommerce/' . WC()->version,
-        ]);
+        $verify_response = $this->opp_http_request(
+            'POST',
+            self::APC_URL,
+            [
+                'timeout' => 30,
+                'body'    => wp_unslash($_POST), // phpcs:ignore WordPress.Security.NonceVerification.Missing
+                'headers' => [
+                    'Content-Type' => 'application/x-www-form-urlencoded',
+                    'User-Agent'   => 'WooCommerce/' . WC()->version,
+                ],
+            ]
+        );
 
-        $output = is_wp_error($verify_response) ? '' : wp_remote_retrieve_body($verify_response);
+        $output = is_wp_error($verify_response) ? '' : $this->http_response_body($verify_response);
 
         $this->log_event('info', 'APC verification response', [
             'order_id' => $order_id,
@@ -747,6 +763,8 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
                 WC()->api_request_url(self::NOTIFICATION_ACTION)
             ),
         ];
+
+        $this->apply_merchant_url_parameter($body);
 
         $this->apply_opp_customer_fields_to_body($body, $order);
 
@@ -887,27 +905,30 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
             'amount' => $this->format_amount($order->get_total()),
             'currency' => $order->get_currency(),
             'merchantTransactionId' => (string) $order->get_id(),
-            'shopperResultUrl' => add_query_arg(
+        ];
+
+        $this->apply_merchant_url_parameter($body);
+
+        $body['shopperResultUrl'] = add_query_arg(
             [
                 'order_id' => $order->get_id(),
                 'order_key' => $order->get_order_key(),
             ],
             WC()->api_request_url(self::CALLBACK_ACTION)
-         ),
-            'notificationUrl'  => add_query_arg(
+        );
+        $body['notificationUrl'] = add_query_arg(
                 [
                     'order_id'  => $order->get_id(),
                     'order_key' => $order->get_order_key(),
                 ],
                 WC()->api_request_url(self::NOTIFICATION_ACTION)
-            ),
-            'customParameters[SHOPPER_amount]'    => $this->format_amount($order->get_total()),
-            'customParameters[SHOPPER_currency]'  => $order->get_currency(),
-            'customParameters[SHOPPER_order_key]' => $order->get_order_key(),
-            'customParameters[SHOPPER_cart_hash]'  => $order->get_cart_hash(),
-            'customParameters[SHOPPER_platform]'  => 'WooCommerce',
-            'customParameters[SHOPPER_plugin]'    => NCX_CP_API::VERSION,
-        ];
+            );
+        $body['customParameters[SHOPPER_amount]']    = $this->format_amount($order->get_total());
+        $body['customParameters[SHOPPER_currency]']  = $order->get_currency();
+        $body['customParameters[SHOPPER_order_key]'] = $order->get_order_key();
+        $body['customParameters[SHOPPER_cart_hash]']  = $order->get_cart_hash();
+        $body['customParameters[SHOPPER_platform]']  = 'WooCommerce';
+        $body['customParameters[SHOPPER_plugin]']    = NCX_CP_API::VERSION;
 
         $this->apply_opp_customer_fields_to_body($body, $order);
 
@@ -956,26 +977,53 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
 			$credentials['entity_id'],
 			untrailingslashit($region_host) . '/v1/checkouts/' . $checkout_id
 		);
-		
-       $response = wp_remote_post(
+		$request_headers = $this->build_opp_outbound_headers($credentials);
+		$request_log     = $this->build_opp_outbound_log_context($update_url, $request_headers, $body, $credentials, $use_test);
+
+       $response = $this->opp_http_request(
+			'POST',
 			$update_url,
 			[
 				'timeout' => 60,
-				'headers' => $this->build_auth_headers($credentials),
+				'headers' => $request_headers,
 				'body'    => $body,
 			]
 		);
 
         if (is_wp_error($response)) {
+            $this->log_event('error', 'update_checkout_data transport error', array_merge(
+                $request_log,
+                [
+                    'error'      => $response->get_error_message(),
+                    'error_code' => $response->get_error_code(),
+                ]
+            ));
             return $response;
         }
 
-        $data = json_decode(wp_remote_retrieve_body($response), true);
-        $code = $data['result']['code'] ?? '';
+        $raw_body  = $this->http_response_body($response);
+        $http_code = $this->http_response_code($response);
+        $data      = json_decode($raw_body, true);
+        $is_json   = is_array($data);
+        $code      = $is_json ? ($data['result']['code'] ?? 'unknown') : 'non_json';
 
         if ('000.200.101' !== $code) {
-            $desc = $data['result']['description'] ?? 'Failed to update checkout';
-            $this->log_event('error', 'update_checkout_data failed: ' . $code . ' - ' . $desc);
+            $desc = $is_json
+                ? ($data['result']['description'] ?? 'Failed to update checkout')
+                : 'Failed to update checkout (non-JSON response)';
+
+            $this->log_event('error', 'update_checkout_data failed: ' . $code . ' - ' . $desc . ' (HTTP ' . $http_code . ')', array_merge(
+                $request_log,
+                [
+                    'http_code'        => $http_code,
+                    'response_is_json' => $is_json,
+                    'response_preview' => mb_substr($raw_body, 0, 2000),
+                    'response_headers' => $this->http_response_headers($response),
+                    'parameter_errors' => $is_json ? ($data['result']['parameterErrors'] ?? []) : [],
+                    'opp_result'       => $is_json ? ($data['result'] ?? []) : [],
+                    'opp_ndc'          => $is_json ? ($data['ndc'] ?? '') : '',
+                ]
+            ));
             return new WP_Error('ncx_cp_update_failed', $desc);
         }
 
@@ -987,30 +1035,81 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
      */
     private function post_to_checkouts(array $credentials, array $body, ?bool $force_test = null) {
         // Issues a /v1/checkouts request and returns either the checkout payload or WP_Error.
-        $region_host = $this->get_region_host($force_test);
+        $this->apply_merchant_url_parameter($body);
 
-        $response = wp_remote_post(
-            $region_host . '/v1/checkouts',
+        $request_url = $this->get_region_host($force_test) . '/v1/checkouts';
+        $request_body = $body;
+
+        if ($this->use_opp_entity_in_query() && isset($request_body['entityId'])) {
+            $request_url = add_query_arg('entityId', $request_body['entityId'], $request_url);
+            unset($request_body['entityId']);
+        }
+
+        $request_headers = $this->build_opp_outbound_headers($credentials);
+        $request_log     = $this->build_opp_outbound_log_context($request_url, $request_headers, $body, $credentials, $force_test);
+
+        $response = $this->opp_http_request(
+            'POST',
+            $request_url,
             [
                 'timeout' => 60,
-                'headers' => $this->build_auth_headers($credentials),
-                'body'    => $body,
+                'headers' => $request_headers,
+                'body'    => $request_body,
             ]
         );
 
         if (is_wp_error($response)) {
+            $this->log_event('error', 'post_to_checkouts transport error', array_merge(
+                $request_log,
+                [
+                    'error'      => $response->get_error_message(),
+                    'error_code' => $response->get_error_code(),
+                ]
+            ));
             return $response;
         }
 
-        $raw_body = wp_remote_retrieve_body($response);
-        $http_code = wp_remote_retrieve_response_code($response);
-        $data = json_decode($raw_body, true);
+        $raw_body  = $this->http_response_body($response);
+        $http_code = $this->http_response_code($response);
+        $headers   = $this->http_response_headers($response);
+        $data      = json_decode($raw_body, true);
+        $is_json   = is_array($data);
 
         if (!isset($data['id'])) {
-            $code = $data['result']['code'] ?? 'unknown';
-            $desc = $data['result']['description'] ?? 'No checkout ID returned';
-            $this->log_event('error', 'Checkout session failed: ' . $code . ' - ' . $desc . ' (HTTP ' . $http_code . ')');
-            // Return the actual OPP error so it's visible in the frontend for debugging.
+            $code = $is_json ? ($data['result']['code'] ?? 'unknown') : 'non_json';
+            if ($is_json) {
+                $desc = $data['result']['description'] ?? 'No checkout ID returned';
+            } else {
+                $response_server = (string) ($headers['server'] ?? $headers['Server'] ?? '');
+                $akamai_blocked    = 403 === $http_code
+                    && (false !== stripos($response_server, 'Akamai') || false !== stripos($raw_body, 'Access Denied'));
+                if ($akamai_blocked) {
+                    $desc = sprintf(
+                        /* translators: %s: edge server name, e.g. AkamaiGHost */
+                        __('Outbound API blocked by %s (HTTP 403). Ask PAYSTRAX to whitelist this server\'s outbound IP.', 'ncx-cp-api'),
+                        $response_server ?: 'Akamai'
+                    );
+                } else {
+                    $desc = sprintf(
+                        __('No checkout ID returned (HTTP %d, non-JSON response)', 'ncx-cp-api'),
+                        $http_code
+                    );
+                }
+            }
+
+            $this->log_event('error', 'Checkout session failed: ' . $code . ' - ' . $desc . ' (HTTP ' . $http_code . ')', array_merge(
+                $request_log,
+                [
+                    'http_code'        => $http_code,
+                    'response_is_json' => $is_json,
+                    'response_preview' => mb_substr($raw_body, 0, 2000),
+                    'response_headers' => $headers,
+                    'opp_result'       => $is_json ? ($data['result'] ?? []) : [],
+                    'parameter_errors' => $is_json ? ($data['result']['parameterErrors'] ?? []) : [],
+                    'opp_ndc'          => $is_json ? ($data['ndc'] ?? '') : '',
+                ]
+            ));
+
             return new WP_Error('ncx_cp_no_checkout', $code . ': ' . $desc);
         }
 
@@ -1031,7 +1130,8 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
         $url = $region_host . $normalized_path;
         $url = add_query_arg('entityId', $credentials['entity_id'], $url);
 
-        $response = wp_remote_get(
+        $response = $this->opp_http_request(
+            'GET',
             $url,
             [
                 'timeout' => 60,
@@ -1043,7 +1143,7 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
             return $response;
         }
 
-        $data = json_decode(wp_remote_retrieve_body($response), true);
+        $data = json_decode($this->http_response_body($response), true);
         if (!is_array($data) || empty($data['result']['code'])) {
             return new WP_Error('ncx_cp_invalid_result', __('Invalid response from COPYandPAY.', 'ncx-cp-api'));
         }
@@ -1058,6 +1158,20 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
             'Content-Type'  => 'application/x-www-form-urlencoded; charset=UTF-8',
             'Authorization' => 'Bearer ' . $settings['access_token'],
         ];
+    }
+
+    /**
+     * Outbound headers including User-Agent (matches WordPress HTTP defaults when omitted).
+     */
+    private function build_opp_outbound_headers(array $credentials): array {
+        $headers = $this->build_auth_headers($credentials);
+        if (!isset($headers['User-Agent']) && !isset($headers['user-agent'])) {
+            $headers['User-Agent'] = apply_filters(
+                'http_headers_useragent',
+                'WordPress/' . get_bloginfo('version') . '; ' . home_url('/')
+            );
+        }
+        return $headers;
     }
 
     /**
@@ -1103,12 +1217,12 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
         $url = $region_host . '/v1/registrations/' . rawurlencode($registration_id);
         $url = add_query_arg('entityId', $credentials['entity_id'], $url);
 
-        $response = wp_remote_request(
+        $response = $this->opp_http_request(
+            'DELETE',
             $url,
             [
-                'method'  => 'DELETE',
                 'timeout' => 15,
-                'headers' => $this->build_auth_headers($credentials),
+                'headers' => $this->build_opp_outbound_headers($credentials),
             ]
         );
 
@@ -1120,7 +1234,7 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
             return;
         }
 
-        $data = json_decode(wp_remote_retrieve_body($response), true);
+        $data = json_decode($this->http_response_body($response), true);
         $code = is_array($data) ? (string) ($data['result']['code'] ?? '') : '';
 
         if (in_array($code, ['000.000.000', '000.100.110'], true)) {
@@ -1301,6 +1415,23 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
 
     private function get_minimum_payment_error_message(): string {
         return __('Amount less than 50p is not permitted.', 'ncx-cp-api');
+    }
+
+    /**
+     * Store domain for OPP merchant.url (WordPress site address).
+     */
+    private function get_merchant_url(): string {
+        return untrailingslashit(home_url('/'));
+    }
+
+    /**
+     * Attach merchant.url when creating or updating a checkout session.
+     */
+    private function apply_merchant_url_parameter(array &$body): void {
+        $merchant_url = $this->get_merchant_url();
+        if ('' !== $merchant_url) {
+            $body['merchant.url'] = $merchant_url;
+        }
     }
 
     /**
@@ -1715,7 +1846,7 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
                 $script_handle,
                 'ncxCpInline',
                 [
-                    'ajaxUrl'            => admin_url('admin-ajax.php'),
+                    'ajaxUrl'            => WC_AJAX::get_endpoint('ncx_cp_request_checkout_id'),
                     'nonce'              => wp_create_nonce('ncx_cp_checkout_nonce'),
                     'regionHost'         => $this->get_region_host(),
                     'environment'        => $this->test_mode ? 'test' : 'live',
@@ -2130,6 +2261,559 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
         ]);
 
         return is_array($orders) ? count($orders) : 0;
+    }
+
+    /**
+     * Log context for outbound OPP requests (redacted).
+     */
+    private function build_opp_outbound_log_context(
+        string $request_url,
+        array $request_headers,
+        array $body,
+        array $credentials,
+        ?bool $force_test
+    ): array {
+        return [
+            'request_url'          => $this->redact_opp_request_url($request_url),
+            'request_headers'      => $this->redact_opp_request_headers($request_headers),
+            'request_body'         => $this->redact_opp_log_body($body),
+            'request_body_encoded' => $this->encode_opp_log_body($body),
+            'credential_summary'   => $this->summarize_opp_credentials($credentials, $force_test),
+            'http_transport'       => $this->get_active_http_transport(),
+            'entity_in_query'      => $this->use_opp_entity_in_query(),
+        ];
+    }
+
+    /**
+     * Transport used for live outbound requests (cURL preferred; WordPress only if cURL missing).
+     */
+    private function get_active_http_transport(): string {
+        return function_exists('curl_init') ? 'curl' : 'wordpress';
+    }
+
+    /**
+     * Whether Phase 1 should move entityId from the body into the request URL.
+     */
+    private function use_opp_entity_in_query(): bool {
+        return 'yes' === $this->get_option('opp_entity_in_query', 'no');
+    }
+
+    /**
+     * @param array|WP_Error $response
+     */
+    private function http_response_body($response): string {
+        if (is_wp_error($response)) {
+            return '';
+        }
+
+        return (string) ($response['body'] ?? '');
+    }
+
+    /**
+     * @param array|WP_Error $response
+     */
+    private function http_response_code($response): int {
+        if (is_wp_error($response)) {
+            return 0;
+        }
+
+        return (int) ($response['response']['code'] ?? 0);
+    }
+
+    /**
+     * @param array|WP_Error $response
+     * @return array<string, string>
+     */
+    private function http_response_headers($response): array {
+        if (is_wp_error($response)) {
+            return [];
+        }
+
+        return $this->flatten_http_headers($response['headers'] ?? []);
+    }
+
+    /**
+     * Outbound HTTP using direct cURL by default (bypasses WordPress HTTP API hooks).
+     * WordPress wp_remote_request is used only when the cURL extension is unavailable,
+     * or when $force_transport is set to "wordpress" for diagnostics.
+     *
+     * @param array{timeout?: int, headers?: array<string, string>, body?: array<string, mixed>|string} $args
+     */
+    private function opp_http_request(string $method, string $url, array $args, ?string $force_transport = null) {
+        $timeout = isset($args['timeout']) ? (int) $args['timeout'] : 60;
+        $headers = isset($args['headers']) && is_array($args['headers']) ? $args['headers'] : [];
+        $body    = $args['body'] ?? null;
+
+        if ('wordpress' === $force_transport) {
+            return $this->opp_http_request_via_wordpress($method, $url, $headers, $body, $timeout);
+        }
+
+        if (function_exists('curl_init')) {
+            return $this->opp_http_request_via_curl($method, $url, $headers, $body, $timeout);
+        }
+
+        if ('curl' === $force_transport) {
+            return new WP_Error('ncx_cp_no_curl', __('cURL extension is not available on this server.', 'ncx-cp-api'));
+        }
+
+        $this->log_event('warning', 'cURL unavailable — falling back to WordPress HTTP API', [
+            'url'    => $this->redact_opp_request_url($url),
+            'method' => strtoupper($method),
+        ]);
+
+        return $this->opp_http_request_via_wordpress($method, $url, $headers, $body, $timeout);
+    }
+
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed>|string|null $body
+     */
+    private function opp_http_request_via_wordpress(string $method, string $url, array $headers, $body, int $timeout) {
+        $request_args = [
+            'method'  => strtoupper($method),
+            'timeout' => $timeout,
+            'headers' => $headers,
+        ];
+
+        if (null !== $body && '' !== $body && [] !== $body) {
+            $request_args['body'] = $body;
+        }
+
+        return wp_remote_request($url, $request_args);
+    }
+
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed>|string|null $body
+     */
+    private function opp_http_request_via_curl(string $method, string $url, array $headers, $body, int $timeout) {
+        if (!function_exists('curl_init')) {
+            return new WP_Error('ncx_cp_no_curl', __('cURL extension is not available on this server.', 'ncx-cp-api'));
+        }
+
+        $method = strtoupper($method);
+        $ch     = curl_init($url);
+        if (false === $ch) {
+            return new WP_Error('ncx_cp_curl_init', __('Unable to initialise cURL.', 'ncx-cp-api'));
+        }
+
+        $curl_headers = [];
+        foreach ($headers as $key => $value) {
+            $curl_headers[] = $key . ': ' . $value;
+        }
+
+        $encoded_body = null;
+        if (null !== $body && '' !== $body && [] !== $body) {
+            $encoded_body = is_array($body)
+                ? http_build_query($body, '', '&', PHP_QUERY_RFC3986)
+                : (string) $body;
+        }
+
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HEADER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $curl_headers);
+        curl_setopt($ch, CURLOPT_TIMEOUT, max(1, $timeout));
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+
+        if (null !== $encoded_body && in_array($method, ['POST', 'PUT', 'PATCH'], true)) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $encoded_body);
+        }
+
+        $raw_response = curl_exec($ch);
+        if (false === $raw_response) {
+            $error = curl_error($ch);
+            curl_close($ch);
+            return new WP_Error('ncx_cp_curl_error', $error ?: __('cURL request failed.', 'ncx-cp-api'));
+        }
+
+        $status_code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $header_size = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        curl_close($ch);
+
+        $raw_headers = substr($raw_response, 0, $header_size);
+        $raw_body    = substr($raw_response, $header_size);
+
+        return [
+            'headers'  => $this->parse_raw_http_headers($raw_headers),
+            'body'     => $raw_body,
+            'response' => [
+                'code'    => $status_code,
+                'message' => get_status_header_desc($status_code) ?: '',
+            ],
+            'cookies'  => [],
+            'filename' => null,
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function parse_raw_http_headers(string $raw_headers): array {
+        $headers = [];
+        $lines   = preg_split("/\r\n|\n|\r/", trim($raw_headers));
+        if (!is_array($lines)) {
+            return $headers;
+        }
+
+        foreach ($lines as $line) {
+            if ('' === $line || false !== stripos($line, 'HTTP/')) {
+                continue;
+            }
+            $parts = explode(':', $line, 2);
+            if (2 !== count($parts)) {
+                continue;
+            }
+            $headers[trim($parts[0])] = trim($parts[1]);
+        }
+
+        return $headers;
+    }
+
+    /**
+     * Summarise an HTTP response for admin diagnostics (no secrets).
+     *
+     * @param array|WP_Error $response
+     */
+    private function summarize_opp_http_response($response, string $transport): array {
+        if (is_wp_error($response)) {
+            return [
+                'transport'        => $transport,
+                'success'          => false,
+                'error_code'       => $response->get_error_code(),
+                'error_message'    => $response->get_error_message(),
+                'http_code'        => 0,
+                'response_is_json' => false,
+                'checkout_id'      => '',
+                'opp_result_code'  => '',
+                'response_server'  => '',
+                'response_preview' => '',
+            ];
+        }
+
+        $raw_body  = $this->http_response_body($response);
+        $http_code = $this->http_response_code($response);
+        $headers   = $this->http_response_headers($response);
+        $data      = json_decode($raw_body, true);
+        $is_json   = is_array($data);
+
+        return [
+            'transport'        => $transport,
+            'success'          => $is_json && !empty($data['id']),
+            'error_code'       => '',
+            'error_message'    => '',
+            'http_code'        => $http_code,
+            'response_is_json' => $is_json,
+            'checkout_id'      => $is_json ? (string) ($data['id'] ?? '') : '',
+            'opp_result_code'  => $is_json ? (string) ($data['result']['code'] ?? '') : 'non_json',
+            'response_server'  => (string) ($headers['server'] ?? $headers['Server'] ?? ''),
+            'response_preview' => mb_substr($raw_body, 0, 400),
+        ];
+    }
+
+    /**
+     * Best-effort detection of this server's outbound IP (for PAYSTRAX whitelist requests).
+     */
+    private function detect_server_outbound_ip(): string {
+        if (!function_exists('curl_init')) {
+            return '';
+        }
+
+        $ch = curl_init('https://api.ipify.org');
+        if (false === $ch) {
+            return '';
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 5,
+            CURLOPT_CONNECTTIMEOUT => 5,
+        ]);
+
+        $body = curl_exec($ch);
+        curl_close($ch);
+
+        if (false === $body) {
+            return '';
+        }
+
+        $ip = trim((string) $body);
+
+        return filter_var($ip, FILTER_VALIDATE_IP) ? $ip : '';
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function detect_opp_http_filters(): array {
+        global $wp_filter;
+
+        $hooks = ['pre_http_request', 'http_request_args', 'http_api_curl', 'requests-requests.before_request'];
+        $out   = [];
+
+        foreach ($hooks as $hook) {
+            if (isset($wp_filter[$hook]) && $wp_filter[$hook] instanceof WP_Hook) {
+                $count = 0;
+                foreach ($wp_filter[$hook]->callbacks as $callbacks) {
+                    $count += count($callbacks);
+                }
+                $out[$hook] = $count;
+            } else {
+                $out[$hook] = 0;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Admin-only: compare WordPress vs cURL against POST /v1/checkouts.
+     */
+    public function ajax_opp_connectivity_test(): void {
+        if (!current_user_can('manage_woocommerce')) {
+            wp_send_json_error(['message' => __('Permission denied.', 'ncx-cp-api')]);
+            return;
+        }
+
+        if (!check_ajax_referer('ncx_cp_opp_connectivity_test', 'security', false)) {
+            wp_send_json_error(['message' => __('Security check failed. Reload this settings page and try again.', 'ncx-cp-api')]);
+            return;
+        }
+
+        $use_test = (bool) $this->test_mode;
+        $credentials = $this->get_active_credentials($use_test);
+        if (!$this->credentials_present($credentials)) {
+            wp_send_json_error(['message' => __('Credentials missing for the current Mode.', 'ncx-cp-api')]);
+            return;
+        }
+
+        $url = $this->get_region_host($use_test) . '/v1/checkouts';
+        $body = [
+            'entityId'    => $credentials['entity_id'],
+            'paymentType' => self::PAYMENT_TYPE,
+            'amount'      => '1.00',
+            'currency'    => self::MERCHANT_CURRENCY,
+        ];
+        $this->apply_standing_instruction_parameters($body);
+        $this->apply_merchant_url_parameter($body);
+
+        if ($this->use_opp_entity_in_query()) {
+            $url = add_query_arg('entityId', $body['entityId'], $url);
+            unset($body['entityId']);
+        }
+
+        $headers = $this->build_opp_outbound_headers($credentials);
+        $args    = [
+            'timeout' => 30,
+            'headers' => $headers,
+            'body'    => $body,
+        ];
+
+        $wordpress = $this->summarize_opp_http_response(
+            $this->opp_http_request('POST', $url, $args, 'wordpress'),
+            'wordpress'
+        );
+        $curl = $this->summarize_opp_http_response(
+            $this->opp_http_request('POST', $url, $args, 'curl'),
+            'curl'
+        );
+
+        $payload = [
+            'mode'               => $use_test ? 'test' : 'live',
+            'region_host'        => $this->get_region_host($use_test),
+            'request_url'        => $this->redact_opp_request_url($url),
+            'entity_in_query'    => $this->use_opp_entity_in_query(),
+            'merchant_url'       => $this->get_merchant_url(),
+            'active_transport'   => $this->get_active_http_transport(),
+            'server_outbound_ip' => $this->detect_server_outbound_ip(),
+            'http_filters'       => $this->detect_opp_http_filters(),
+            'curl_available'     => function_exists('curl_init'),
+            'results'            => [
+                'wordpress' => $wordpress,
+                'curl'      => $curl,
+            ],
+        ];
+
+        if ($this->server_logging) {
+            $this->get_logger()->log('info', 'OPP connectivity test completed', array_merge(['source' => $this->id], $payload));
+        }
+
+        wp_send_json_success($payload);
+    }
+
+    /**
+     * Renders the connectivity test button on the gateway settings screen.
+     */
+    public function generate_opp_connectivity_test_html(string $key, array $data): string {
+        $field_key = $this->get_field_key($key);
+        $defaults  = [
+            'title'       => '',
+            'description' => '',
+        ];
+        $data = wp_parse_args($data, $defaults);
+
+        ob_start();
+        ?>
+        <tr valign="top">
+            <th scope="row" class="titledesc">
+                <label for="<?php echo esc_attr($field_key); ?>"><?php echo wp_kses_post($data['title']); ?></label>
+            </th>
+            <td class="forminp" id="<?php echo esc_attr($field_key); ?>">
+                <?php echo wp_kses_post($this->get_description_html($data)); ?>
+                <p>
+                    <button type="button" class="button button-secondary" id="ncx-cp-opp-connectivity-test">
+                        <?php esc_html_e('Run connectivity test', 'ncx-cp-api'); ?>
+                    </button>
+                    <span class="spinner" style="float:none;margin-top:0;"></span>
+                </p>
+                <pre id="ncx-cp-opp-connectivity-results" style="display:none;max-width:100%;white-space:pre-wrap;background:#f6f7f7;border:1px solid #dcdcde;padding:12px;margin-top:8px;"></pre>
+            </td>
+        </tr>
+        <?php
+        return ob_get_clean();
+    }
+
+    /**
+     * Loads the admin script for the connectivity test button.
+     */
+    public function maybe_enqueue_admin_assets(string $hook_suffix): void {
+        if ('woocommerce_page_wc-settings' !== $hook_suffix) {
+            return;
+        }
+
+        if (!isset($_GET['section']) || 'ncx_cp_api' !== sanitize_text_field(wp_unslash($_GET['section']))) {
+            return;
+        }
+
+        wp_register_script('ncx-cp-api-admin', false, ['jquery'], NCX_CP_API::VERSION, true);
+        wp_enqueue_script('ncx-cp-api-admin');
+        wp_localize_script(
+            'ncx-cp-api-admin',
+            'ncxCpAdmin',
+            [
+                'ajaxUrl'           => admin_url('admin-ajax.php'),
+                'connectivityNonce' => wp_create_nonce('ncx_cp_opp_connectivity_test'),
+            ]
+        );
+        wp_add_inline_script(
+            'ncx-cp-api-admin',
+            'jQuery(function($){
+                var $btn=$("#ncx-cp-opp-connectivity-test");
+                if(!$btn.length||typeof ncxCpAdmin==="undefined"){return;}
+                var $spinner=$btn.siblings(".spinner");
+                var $out=$("#ncx-cp-opp-connectivity-results");
+                $btn.on("click",function(){
+                    $btn.prop("disabled",true);
+                    $spinner.addClass("is-active");
+                    $out.hide().text("");
+                    $.ajax({
+                        url: ncxCpAdmin.ajaxUrl,
+                        type: "POST",
+                        dataType: "json",
+                        data: {
+                            action: "ncx_cp_opp_connectivity_test",
+                            security: ncxCpAdmin.connectivityNonce
+                        }
+                    }).done(function(resp){
+                        if(resp&&resp.success&&resp.data){
+                            $out.text(JSON.stringify(resp.data,null,2)).show();
+                        }else{
+                            var msg=(resp&&resp.data&&resp.data.message)?resp.data.message:"Test failed";
+                            $out.text(msg).show();
+                        }
+                    }).fail(function(xhr){
+                        var detail=xhr.responseText||"";
+                        if(detail==="0"){
+                            detail="Admin AJAX action not registered. Confirm both ncx-cp-api.php and the gateway file are updated and the plugin is active.";
+                        }
+                        $out.text("HTTP "+xhr.status+": "+detail).show();
+                    }).always(function(){
+                        $btn.prop("disabled",false);
+                        $spinner.removeClass("is-active");
+                    });
+                });
+            });',
+            'after'
+        );
+    }
+
+    private function redact_opp_request_url(string $url): string {
+        return (string) preg_replace_callback(
+            '/([?&]entityId=)([^&]+)/',
+            static function (array $matches): string {
+                $value = urldecode($matches[2]);
+                return $matches[1] . '***' . substr($value, -8);
+            },
+            $url
+        );
+    }
+
+    private function redact_opp_request_headers(array $headers): array {
+        $out = $headers;
+        foreach (['Authorization', 'authorization'] as $key) {
+            if (!isset($out[$key])) {
+                continue;
+            }
+            $value = (string) $out[$key];
+            if (0 === stripos($value, 'Bearer ')) {
+                $token = substr($value, 7);
+                $out[$key] = 'Bearer ' . ('' !== $token ? substr($token, 0, 6) . '…' : '');
+            } else {
+                $out[$key] = '***';
+            }
+        }
+        return $out;
+    }
+
+    private function encode_opp_log_body(array $body): string {
+        $encoded = http_build_query($this->redact_opp_log_body($body), '', '&', PHP_QUERY_RFC3986);
+        return mb_substr($encoded, 0, 2000);
+    }
+
+    /**
+     * Redact sensitive values before writing OPP request bodies to logs.
+     */
+    private function redact_opp_log_body(array $body): array {
+        $out = $body;
+        if (isset($out['entityId'])) {
+            $out['entityId'] = '***' . substr((string) $out['entityId'], -8);
+        }
+        foreach ($out as $key => $value) {
+            if (preg_match('/^registrations\[\d+\]\.id$/', (string) $key)) {
+                $out[$key] = is_string($value) ? substr($value, 0, 8) . '…' : '***';
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Safe credential summary for diagnostics (never log full token).
+     */
+    private function summarize_opp_credentials(array $credentials, ?bool $force_test): array {
+        $token  = (string) ($credentials['access_token'] ?? '');
+        $entity = (string) ($credentials['entity_id'] ?? '');
+        $use_test = is_null($force_test) ? (bool) $this->test_mode : (bool) $force_test;
+
+        return [
+            'use_test'            => $use_test,
+            'region_host'         => $this->get_region_host($force_test),
+            'entity_id_suffix'    => strlen($entity) >= 8 ? substr($entity, -8) : $entity,
+            'entity_id_length'    => strlen($entity),
+            'access_token_length' => strlen($token),
+            'access_token_prefix' => '' !== $token ? substr($token, 0, 6) . '…' : '',
+            'credentials_present' => $this->credentials_present($credentials),
+        ];
+    }
+
+    private function flatten_http_headers($headers): array {
+        if (is_array($headers)) {
+            return $headers;
+        }
+        if (is_object($headers) && method_exists($headers, 'getAll')) {
+            return $headers->getAll();
+        }
+        return [];
     }
 
     // Sends gateway messages to the WooCommerce logger when the level is enabled.

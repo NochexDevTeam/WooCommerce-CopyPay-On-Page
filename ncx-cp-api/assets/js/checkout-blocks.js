@@ -252,7 +252,6 @@
 
     function requestCheckoutId(callback) {
         var body = new URLSearchParams();
-        body.append('action', 'ncx_cp_request_checkout_id');
         body.append('security', settings.nonce || '');
         body.append('context', 'blocks');
 

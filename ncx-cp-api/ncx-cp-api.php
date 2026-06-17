@@ -172,12 +172,18 @@ final class NCX_CP_API {
 
 new NCX_CP_API();
 
-add_action('plugins_loaded', static function () {
-    load_plugin_textdomain('ncx-cp-api', false, dirname(plugin_basename(__FILE__)) . '/languages');
-
+/**
+ * Load gateway classes, register with WooCommerce, and wire AJAX handlers once.
+ */
+function ncx_cp_api_bootstrap_gateway(): void {
+    static $bootstrapped = false;
+    if ($bootstrapped) {
+        return;
+    }
     if (!class_exists('WC_Payment_Gateway')) {
         return;
     }
+    $bootstrapped = true;
 
     require_once plugin_dir_path(__FILE__) . 'includes/class-ncx-cp-api-gateway.php';
     require_once plugin_dir_path(__FILE__) . 'includes/class-ncx-cp-api-saved-cards-admin.php';
@@ -188,24 +194,68 @@ add_action('plugins_loaded', static function () {
         return $gateways;
     });
 
-    // Register AJAX actions early so handlers work even if WooCommerce has not
-    // instantiated payment gateways before admin-ajax.php executes.
-    $gateway_ajax = static function (string $method) {
-        return static function () use ($method) {
-            if (function_exists('WC') && WC()->payment_gateways()) {
-                $gateways = WC()->payment_gateways()->payment_gateways();
-                if (isset($gateways['ncx_cp_api']) && $gateways['ncx_cp_api'] instanceof NCX_CP_API_Gateway && method_exists($gateways['ncx_cp_api'], $method)) {
-                    $gateways['ncx_cp_api']->{$method}();
-                    return;
-                }
+    ncx_cp_api_register_ajax_handlers();
+}
+
+/**
+ * Register WC AJAX / admin-ajax handlers for checkout ID and connectivity diagnostics.
+ */
+function ncx_cp_api_register_ajax_handlers(): void {
+    static $registered = false;
+    if ($registered) {
+        return;
+    }
+    $registered = true;
+
+    $resolve_gateway = static function (): ?NCX_CP_API_Gateway {
+        if (!function_exists('WC')) {
+            return null;
+        }
+
+        $wc = WC();
+        if (!$wc || !is_callable([$wc, 'payment_gateways'])) {
+            return null;
+        }
+
+        $payment_gateways = $wc->payment_gateways();
+        if (!$payment_gateways) {
+            return null;
+        }
+
+        $gateways = $payment_gateways->payment_gateways();
+        if (!isset($gateways['ncx_cp_api']) || !$gateways['ncx_cp_api'] instanceof NCX_CP_API_Gateway) {
+            return null;
+        }
+
+        return $gateways['ncx_cp_api'];
+    };
+
+    $gateway_ajax = static function (string $method) use ($resolve_gateway) {
+        return static function () use ($method, $resolve_gateway): void {
+            $gateway = $resolve_gateway();
+            if (!$gateway || !method_exists($gateway, $method)) {
+                wp_send_json_error(['message' => 'Gateway not available']);
+                return;
             }
-            wp_send_json_error(['message' => 'Gateway not available']);
+
+            $gateway->{$method}();
         };
     };
 
-    add_action('wp_ajax_ncx_cp_request_checkout_id',        $gateway_ajax('ajax_request_checkout_id'));
+    add_action('wc_ajax_ncx_cp_request_checkout_id', $gateway_ajax('ajax_request_checkout_id'));
+    add_action('wc_ajax_nopriv_ncx_cp_request_checkout_id', $gateway_ajax('ajax_request_checkout_id'));
+
+    add_action('wp_ajax_ncx_cp_request_checkout_id', $gateway_ajax('ajax_request_checkout_id'));
     add_action('wp_ajax_nopriv_ncx_cp_request_checkout_id', $gateway_ajax('ajax_request_checkout_id'));
-});
+    add_action('wp_ajax_ncx_cp_opp_connectivity_test', $gateway_ajax('ajax_opp_connectivity_test'));
+}
+
+add_action('plugins_loaded', static function (): void {
+    load_plugin_textdomain('ncx-cp-api', false, dirname(plugin_basename(__FILE__)) . '/languages');
+}, 0);
+
+add_action('plugins_loaded', 'ncx_cp_api_bootstrap_gateway', 20);
+add_action('woocommerce_loaded', 'ncx_cp_api_bootstrap_gateway', 5);
 
 // Declare HPOS (High-Performance Order Storage) compatibility.
 add_action('before_woocommerce_init', static function () {

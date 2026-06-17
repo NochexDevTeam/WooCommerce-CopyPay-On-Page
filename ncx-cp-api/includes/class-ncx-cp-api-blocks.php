@@ -73,7 +73,7 @@ final class NCX_CP_API_Blocks extends AbstractPaymentMethodType {
             'title'              => $this->gateway->get_title(),
             'description'        => $this->gateway->get_description(),
             'supports'           => array_values(array_diff($this->gateway->supports, ['tokenization'])),
-            'ajaxUrl'            => admin_url('admin-ajax.php'),
+            'ajaxUrl'            => WC_AJAX::get_endpoint('ncx_cp_request_checkout_id'),
             'nonce'              => wp_create_nonce('ncx_cp_checkout_nonce'),
             'regionHost'         => $region_host,
             'environment'        => $this->gateway->get_option('test_mode', 'yes') === 'yes' ? 'test' : 'live',

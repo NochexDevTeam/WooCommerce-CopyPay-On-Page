@@ -295,7 +295,6 @@
             type: 'POST',
             dataType: 'json',
             data: {
-                action: 'ncx_cp_request_checkout_id',
                 security: settings.nonce,
             },
             timeout: 30000,
