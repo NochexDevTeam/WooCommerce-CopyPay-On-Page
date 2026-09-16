@@ -1,0 +1,289 @@
+/* Nochex gateway settings: compact, merchant-focused WooCommerce admin UI. */
+#mainform.ncx-cp-settings-admin {
+    --ncx-admin-primary: #1e6ba8;
+    --ncx-admin-primary-hover: #145a8e;
+    --ncx-admin-primary-light: #e8f3fa;
+    --ncx-admin-border: #d1d5db;
+    --ncx-admin-border-light: #e5e7eb;
+    --ncx-admin-bg: #f8f9fa;
+    --ncx-admin-text: #1e293b;
+    --ncx-admin-muted: #64748b;
+    --ncx-admin-radius: 8px;
+    --ncx-admin-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+    max-width: 920px;
+    color: var(--ncx-admin-text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+.woocommerce table.form-table th .wc-settings-radio-title .woocommerce-help-tip, .woocommerce table.form-table th .wc-settings-radio-title img.help_tip, .woocommerce table.form-table th label .woocommerce-help-tip, .woocommerce table.form-table th label img.help_tip{
+    position:inherit!important
+}
+#mainform.ncx-cp-settings-admin > h2,
+#mainform.ncx-cp-settings-admin > p:not(.submit),
+#mainform.ncx-cp-settings-admin table.form-table {
+    margin-top: 0;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-source-table-empty {
+    display: none;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-settings-tabs th {
+    padding: 0 0 18px !important;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-settings-tablist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-settings-tab {
+    min-height: 38px;
+    padding: 8px 16px;
+    border: 1px solid var(--ncx-admin-border);
+    border-radius: 999px;
+    background: #fff;
+    color: var(--ncx-admin-text);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-settings-tab:hover {
+    border-color: var(--ncx-admin-primary);
+    color: var(--ncx-admin-primary);
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-settings-tab:focus-visible {
+    outline: 2px solid var(--ncx-admin-primary);
+    outline-offset: 2px;
+}
+
+/* Navigates away to WooCommerce > Saved Cards, so it is never an active tab.
+   Anchors are not blockified like the button tabs, hence the explicit box. */
+#mainform.ncx-cp-settings-admin .ncx-cp-settings-tab-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    border-color: var(--ncx-admin-primary);
+    background: var(--ncx-admin-primary-light);
+    color: var(--ncx-admin-primary);
+    text-decoration: none;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-settings-tab-link:hover {
+    background: #fff;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-settings-tab.is-active {
+    border-color: var(--ncx-admin-primary);
+    background: var(--ncx-admin-primary);
+    color: #fff;
+    box-shadow: var(--ncx-admin-shadow);
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-settings-tab.is-active:hover {
+    border-color: var(--ncx-admin-primary-hover);
+    background: var(--ncx-admin-primary-hover);
+    color: #fff;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-card-shell > td {
+    padding: 0 0 16px !important;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-panel-card,
+#mainform.ncx-cp-settings-admin .ncx-cp-support-details {
+    overflow: hidden;
+    max-width: 760px;
+    border: 1px solid var(--ncx-admin-border);
+    border-radius: var(--ncx-admin-radius);
+    background: #fff;
+    box-shadow: var(--ncx-admin-shadow);
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-card-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--ncx-admin-border-light);
+    background: var(--ncx-admin-bg);
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-card-title {
+    margin: 0;
+    color: var(--ncx-admin-text);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-card-description {
+    max-width: 620px;
+    margin: 3px 0 0;
+    color: var(--ncx-admin-muted);
+    line-height: 1.45;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-card-content {
+    padding: 4px 18px 8px;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-card-content > .form-table {
+    margin: 0;
+}
+
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field > th {
+    width: 190px;
+    padding: 13px 18px 13px 0 !important;
+    vertical-align: top;
+}
+
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field > th.titledesc > label {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 6px;
+    max-width: 100%;
+}
+
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field > th .woocommerce-help-tip {
+    flex: 0 0 16px;
+    margin: 1px 0 0;
+}
+
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field > td {
+    padding: 10px 0 !important;
+    vertical-align: top;
+}
+
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field + tr.ncx-cp-settings-field > th,
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field + tr.ncx-cp-settings-field > td {
+    border-top: 1px solid var(--ncx-admin-border-light);
+}
+
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field input[type="text"],
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field input[type="number"],
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field select,
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field textarea {
+    width: min(440px, 100%);
+}
+
+#mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field .description {
+    max-width: 500px;
+    margin-top: 5px;
+    color: var(--ncx-admin-muted);
+    line-height: 1.45;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-apple-setup-row > th,
+#mainform.ncx-cp-settings-admin .ncx-cp-apple-setup-row > td {
+    background: #fbfdff;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-details {
+    max-width: 760px;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-intro {
+    max-width: 650px;
+    margin: 0 0 10px;
+    color: var(--ncx-admin-muted);
+    line-height: 1.45;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-details > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 15px 18px;
+    background: var(--ncx-admin-bg);
+    cursor: pointer;
+    list-style: none;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-details > summary::-webkit-details-marker {
+    display: none;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-details > summary::after {
+    content: "+";
+    flex: 0 0 auto;
+    color: var(--ncx-admin-primary);
+    font-size: 22px;
+    font-weight: 400;
+    line-height: 1;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-details[open] > summary::after {
+    content: "\2212";
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-details > summary:hover {
+    background: var(--ncx-admin-primary-light);
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-summary-copy {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-summary-copy strong {
+    color: var(--ncx-admin-text);
+    font-size: 15px;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-summary-copy span {
+    margin-top: 2px;
+    color: var(--ncx-admin-muted);
+    font-weight: 400;
+}
+
+#mainform.ncx-cp-settings-admin .ncx-cp-support-content {
+    padding: 4px 18px 8px;
+    border-top: 1px solid var(--ncx-admin-border-light);
+}
+
+#mainform.ncx-cp-settings-admin .submit {
+    margin-top: 4px;
+    padding-top: 0;
+}
+
+#mainform.ncx-cp-settings-admin .button-primary {
+    min-height: 38px;
+    padding-right: 18px;
+    padding-left: 18px;
+}
+
+@media (max-width: 782px) {
+    #mainform.ncx-cp-settings-admin {
+        max-width: none;
+    }
+
+    #mainform.ncx-cp-settings-admin .ncx-cp-settings-tab {
+        flex: 1 1 auto;
+        text-align: center;
+    }
+
+
+    #mainform.ncx-cp-settings-admin .ncx-cp-card-header,
+    #mainform.ncx-cp-settings-admin .ncx-cp-card-content,
+    #mainform.ncx-cp-settings-admin .ncx-cp-support-content {
+        padding-right: 14px;
+        padding-left: 14px;
+    }
+
+    #mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field > th,
+    #mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field > td {
+        display: block;
+        width: auto;
+        padding: 9px 0 !important;
+        border-top: 0 !important;
+    }
+
+    #mainform.ncx-cp-settings-admin tr.ncx-cp-settings-field > th {
+        padding-bottom: 2px !important;
+    }
+}
