@@ -36,6 +36,12 @@ This lightweight tool keeps an eye on your site's scripts - whether inline, exte
 
 == Changelog ==
 
+= 5 =
+* Updated plugin
+    * Support for Google Pay and Apple Pay (Will require support to get these setup initially)
+    * Card Tokenisation
+    * Visual Improvements
+
 = 4 =
 * Updated Plugin
   
