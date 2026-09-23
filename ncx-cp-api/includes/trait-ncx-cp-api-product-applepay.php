@@ -77,7 +77,7 @@ trait NCX_CP_API_Product_Apple_Pay {
         $needs_shipping = $product instanceof WC_Product && $product->needs_shipping();
         $posted         = $this->get_customer_profile_as_checkout_post($needs_shipping);
 
-        return $this->validate_checkout_ready_for_payment($posted, false);
+        return $this->validate_checkout_ready_for_payment($posted);
     }
 
     /**

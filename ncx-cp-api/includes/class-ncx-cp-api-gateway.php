@@ -1552,10 +1552,9 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
      * Ensure required checkout fields are present before creating a payment session.
      *
      * @param array<string, string> $posted_checkout
-     * @param bool                  $require_terms When false, skip the checkout terms checkbox (product-page wallets).
      * @return true|WP_Error
      */
-    private function validate_checkout_ready_for_payment(array $posted_checkout = [], bool $require_terms = true) {
+    private function validate_checkout_ready_for_payment(array $posted_checkout = []) {
         if (!function_exists('WC') || !WC()->checkout()) {
             return true;
         }
@@ -1596,13 +1595,6 @@ class NCX_CP_API_Gateway extends WC_Payment_Gateway {
                         $label
                     ));
                 }
-            }
-        }
-
-        if ($require_terms && wc_terms_and_conditions_checkbox_enabled()) {
-            $terms = $posted_checkout['terms'] ?? ($posted_checkout['terms-field'] ?? '');
-            if ('' === trim((string) $terms)) {
-                $errors->add('terms', __('Please read and accept the terms and conditions to proceed with your order.', 'woocommerce'));
             }
         }
 
