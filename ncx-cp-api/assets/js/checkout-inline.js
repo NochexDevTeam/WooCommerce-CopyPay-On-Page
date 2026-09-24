@@ -39,6 +39,7 @@
         googlePayPrefetchPromise: null,
         googlePayRequestSeq: 0,
         checkoutIdFetchStartedAt: 0,
+        cardTotalAtFetch: null,
         inFlightRetries: 0,
         inFlightTimer: null,
     };
@@ -118,6 +119,15 @@
     function getWpwlScope() {
         var frame = document.getElementById('ncx-cp-inline-frame');
         return frame || document;
+    }
+
+    // Whether the payment box on the page still holds the card widget this
+    // script mounted. A fragment refresh rebuilds the box from payment_fields(),
+    // so a widget mounted before it lands stays alive in the discarded node —
+    // wpwl reports it ready while the shopper looks at an empty frame.
+    function cardWidgetIsMounted() {
+        var frame = document.getElementById('ncx-cp-inline-frame');
+        return !!(frame && frame.querySelector('form.paymentWidgets'));
     }
 
     // Returns true when an element is visible in the layout (not hidden or display:none).
@@ -1176,6 +1186,7 @@
                 }
                 cancelInFlightRetry();
                 state.checkoutId = response.data.checkoutId;
+                state.cardTotalAtFetch = getClassicCheckoutTotal();
                 log('NCX: checkout ID received', state.checkoutId);
                 mountWidget(state.checkoutId);
             } else {
@@ -2217,7 +2228,33 @@
                 log('NCX: cart updated – resetting Google Pay');
                 resetGooglePayToCard();
             } else {
-                requestCheckoutId();
+                // The refresh took the mounted widget with it, and
+                // requestCheckoutId() coalesces anything asked for within
+                // CHECKOUT_ID_COALESCE_MS of the last fetch — so on a page load,
+                // where the mount and the first refresh land together, the
+                // remount is dropped and the shopper is left with no card fields
+                // until they reload. Re-serving the session already held costs no
+                // provider generation, which the per-order attempt cap counts.
+                var orphanedCard = state.activeWidget === 'card'
+                    && state.checkoutId
+                    && !state.widgetLoading
+                    && document.getElementById('ncx-cp-inline-frame')
+                    && !cardWidgetIsMounted();
+
+                if (!orphanedCard) {
+                    requestCheckoutId();
+                } else if (state.cardTotalAtFetch !== null && currentTotal !== null
+                    && currentTotal !== state.cardTotalAtFetch) {
+                    // The session is fingerprinted against the cart it was minted
+                    // for, so a changed total needs a new one, not this one.
+                    log('NCX: cart total changed since the card session was minted – requesting a new one');
+                    clearPostedCheckoutId();
+                    requestCheckoutId(null, true);
+                } else {
+                    log('NCX: payment box was replaced – remounting card widget');
+                    mountWidget(state.checkoutId);
+                }
+
                 if (isApplePayEnabled() && state.activeWidget === 'card') {
                     renderApplePaySwitch();
                 }
