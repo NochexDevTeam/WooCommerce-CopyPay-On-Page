@@ -26,6 +26,7 @@ trait NCX_CP_API_Order_Coordinator {
     private const PROVIDER_CHECKOUT_KIND_META_KEY = '_ncx_cp_provider_checkout_kind';
     private const AMBIGUOUS_META_KEY = '_ncx_cp_payment_ambiguous';
     private const AMBIGUOUS_RECHECK_META_KEY = '_ncx_cp_ambiguous_recheck_at';
+    private const HANDOFF_RECHECK_META_KEY = '_ncx_cp_handoff_recheck_at';
     private const PAYMENT_STARTED_META_KEY = '_ncx_cp_payment_started_at';
     private const HANDOFF_GENERATION_META_KEY = '_ncx_cp_payment_started_generation';
     private const PROVIDER_ATTEMPTS_META_KEY = '_ncx_cp_provider_session_attempts';
@@ -59,6 +60,19 @@ trait NCX_CP_API_Order_Coordinator {
     // Minimum gap between provider re-reads of a frozen order. The browser
     // retries while it waits, so without this each shopper would fan out.
     private const AMBIGUOUS_RECHECK_SECONDS = 30;
+    // Same idea for a session still inside the hand-off grace: the grace is now
+    // asked about rather than waited out, so it needs its own read throttle or
+    // every reload buys another provider round-trip.
+    private const HANDOFF_RECHECK_SECONDS = 15;
+    // How long a handed-off session may sit "pending" before it is read as an
+    // abandoned 3DS2 challenge rather than one still in progress. A completed
+    // authentication reaches the provider within seconds, and the challenge is
+    // a cross-origin iframe inside our own form: once the shopper closes or
+    // reloads the page it is gone and there is no route back to it. Past this
+    // window a pending session can therefore no longer authorise, so holding
+    // the order only stops a shopper paying. Raise it to trade recovery speed
+    // for margin against a challenge completed just before the page was lost.
+    private const ABANDONED_CHALLENGE_SECONDS = 90;
     private const ATTEMPT_TTL_SECONDS = 2 * DAY_IN_SECONDS;
 
     private function register_order_coordinator_hooks(): void {
@@ -598,7 +612,18 @@ trait NCX_CP_API_Order_Coordinator {
 
         $order = wc_get_order($order_id);
         if ($order instanceof WC_Order && $this->order_matches_current_attempt($order)) {
-            WC()->session->set('order_awaiting_payment', $order_id);
+            // Core's wc_clear_cart_after_payment() runs on every front-end page
+            // load and empties the cart whenever this key names an order whose
+            // status is not failed, pending or cancelled — it reads any other
+            // status as "the payment must have gone through". A prefetch order
+            // is an unpaid checkout-draft, so publishing it here costs the
+            // shopper their cart on their next page view. Only advertise the
+            // order once it carries a status core recognises as still unpaid;
+            // WooCommerce reads store_api_draft_order for held-stock checks, and
+            // filter_create_order_reuse_canonical owns order reuse regardless.
+            if ($order->has_status(['pending', 'failed', 'cancelled'])) {
+                WC()->session->set('order_awaiting_payment', $order_id);
+            }
         }
     }
 
@@ -1093,8 +1118,29 @@ trait NCX_CP_API_Order_Coordinator {
                 $count = 0;
                 $window_start = time();
             }
-            if ($count >= $this->get_provider_session_attempt_limit()) {
-                return new WP_Error('ncx_cp_provider_retry_cap', __('Too many payment attempts. Please wait a few minutes and try again.', 'ncx-cp-api'), ['status' => 429]);
+            $limit = $this->get_provider_session_attempt_limit();
+            if ($count >= $limit) {
+                $retry_after = max(
+                    1,
+                    ($window_start + self::PROVIDER_ATTEMPTS_WINDOW_SECONDS) - time()
+                );
+                $this->log_event('warning', 'Provider session rate limit reached', [
+                    'order_id'    => (int) $fresh->get_id(),
+                    'count'       => $count,
+                    'limit'       => $limit,
+                    'generation'  => $committed_generation,
+                    'kind'        => $kind,
+                    'retry_after' => $retry_after,
+                ]);
+                return new WP_Error(
+                    'ncx_cp_provider_retry_cap',
+                    sprintf(
+                        /* translators: %d: seconds until another payment session may be prepared */
+                        __('Too many payment attempts. Please wait %d seconds and try again.', 'ncx-cp-api'),
+                        $retry_after
+                    ),
+                    ['status' => 429, 'retry_after' => $retry_after]
+                );
             }
 
             $generation = max(0, $committed_generation) + 1;
@@ -1359,6 +1405,9 @@ trait NCX_CP_API_Order_Coordinator {
 
         $order->update_meta_data(self::LIFECYCLE_META_KEY, 'payment_started');
         $order->update_meta_data(self::PAYMENT_STARTED_META_KEY, (string) time());
+        // A throttle left over from an earlier hand-off would otherwise suppress
+        // the first provider read of this one.
+        $order->delete_meta_data(self::HANDOFF_RECHECK_META_KEY);
         // Record which generation was executed so the spent provider session is
         // never handed back to the browser as a reusable one.
         $order->update_meta_data(
@@ -1435,8 +1484,12 @@ trait NCX_CP_API_Order_Coordinator {
             // Already held for review; the reservation refuses it.
             return null;
         }
-        if ($this->payment_handoff_within_grace($fresh)) {
-            // Too soon to conclude anything; the reservation applies the grace.
+        // The grace used to refuse without asking anyone, which cost a returning
+        // shopper a minute even when the provider already knew the challenge was
+        // cancelled. Ask instead, but throttled, and treat "no payment" as
+        // inconclusive for the duration — see apply_provider_payment_outcome().
+        $within_grace = $this->payment_handoff_within_grace($fresh);
+        if ($within_grace && !$this->claim_handoff_recheck($fresh)) {
             return $this->payment_in_flight_error($fresh);
         }
 
@@ -1447,7 +1500,30 @@ trait NCX_CP_API_Order_Coordinator {
                 : null;
         }
 
-        return $this->apply_provider_payment_outcome($fresh, $checkout_id);
+        return $this->apply_provider_payment_outcome($fresh, $checkout_id, $within_grace);
+    }
+
+    /**
+     * Rate-limits provider reads of a session still inside the hand-off grace.
+     *
+     * The timestamp is written before the round-trip, not after, so a slow or
+     * failed call still spaces out the next one.
+     *
+     * @return bool True when this caller may read the provider.
+     */
+    private function claim_handoff_recheck(WC_Order $order): bool {
+        $next = (int) $order->get_meta(self::HANDOFF_RECHECK_META_KEY, true);
+        if ($next > time()) {
+            return false;
+        }
+
+        $order->update_meta_data(
+            self::HANDOFF_RECHECK_META_KEY,
+            (string) (time() + self::HANDOFF_RECHECK_SECONDS)
+        );
+        $order->save();
+
+        return true;
     }
 
     /**
@@ -1459,9 +1535,13 @@ trait NCX_CP_API_Order_Coordinator {
      * purpose: two copies of this judgement would eventually disagree, and the
      * cost of disagreeing is charging someone twice.
      *
+     * @param bool $within_grace Whether the hand-off is recent enough that the
+     *                           browser could still be posting the payment, in
+     *                           which case "no payment on this checkout" is a
+     *                           race rather than an answer.
      * @return WP_Error|null WP_Error when no new session may be created.
      */
-    private function apply_provider_payment_outcome(WC_Order $fresh, string $checkout_id): ?WP_Error {
+    private function apply_provider_payment_outcome(WC_Order $fresh, string $checkout_id, bool $within_grace = false): ?WP_Error {
         $payment = $this->fetch_payment_details('/v1/checkouts/' . $checkout_id . '/payment', $fresh);
         if (is_wp_error($payment)) {
             // A reload during 3DS often cannot read a payment yet. Do not freeze
@@ -1514,7 +1594,25 @@ trait NCX_CP_API_Order_Coordinator {
         }
 
         if ('pending' === $state) {
-            return $this->payment_in_flight_error($fresh);
+            if ($this->payment_handoff_age($fresh, self::ABANDONED_CHALLENGE_SECONDS)) {
+                // Recent enough that the shopper could still be on the
+                // challenge, or that a completed one has yet to register.
+                return $this->payment_in_flight_error($fresh);
+            }
+
+            // Still pending well past the point where a completed challenge
+            // would have registered, so nothing was authenticated and the
+            // session that could have authorised is unreachable. Treat it like
+            // any other abandoned attempt: release the order, leave the status
+            // alone so no failed-order email goes out, and let the shopper
+            // start again.
+            $this->mark_cancelled_payment_attempt($fresh, sprintf(
+                /* translators: %s: provider result code */
+                __('COPYandPAY reported no completed authentication (%s) after the abandon window; previous attempt released.', 'ncx-cp-api'),
+                $code
+            ));
+
+            return null;
         }
 
         if ($this->is_payment_cancellation($payment)) {
@@ -1538,6 +1636,13 @@ trait NCX_CP_API_Order_Coordinator {
         }
 
         if (in_array($code, self::NO_PROVIDER_PAYMENT_CODES, true)) {
+            if ($within_grace) {
+                // Indistinguishable from a payment the browser is still posting:
+                // the provider has not written a record yet. Releasing here is
+                // the double-submit case the grace exists for, so wait it out.
+                return $this->payment_in_flight_error($fresh);
+            }
+
             $fresh->add_order_note(sprintf(
                 /* translators: %s: provider result code */
                 __('Previous checkout session carried no payment (%s); preparing a new one.', 'ncx-cp-api'),
